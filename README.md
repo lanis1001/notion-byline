@@ -1,2 +1,23 @@
-# notion-byline
-매일 완료한 필사가 내 이름으로 발행되는 기록 위젯 | Notion transcription log widget
+# BYLINE — 노션 필사 기록 위젯
+
+> *"By Lania Lee."* — 매일 완료한 필사가 내 이름으로 발행되는 기록 위젯
+
+## What it does
+노션 타이핑 필사 템플릿과 연동하여, 필사를 완료한 날을 **Vol. 아카이브 그리드**로 시각화합니다.
+
+- ✅ 완료한 날 → 채워진 칸
+- ⬜ 미완료 → 점선 빈 칸  
+- 🔲 오늘 → 테두리 강조
+- 📅 최근 발행일 표기로 공백 기간 인식
+
+## How to use
+1. 노션 페이지에 위젯 URL을 임베드합니다.
+2. **[오늘의 BYLINE 발행하기]** 버튼을 클릭합니다.
+3. 오늘 날짜가 저장되고 그리드가 업데이트됩니다.
+
+## Tech Stack
+- Notion API
+- Claude Sonnet 5 | Opus 4.8
+
+## Development
+개발했슈 동아리 프로젝트 (2026.07 ~)
