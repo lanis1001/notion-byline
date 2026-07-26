@@ -1,32 +1,36 @@
 // ============================================================
-// BYLINE 위젯 프로토타입 — v2 (Figma 디자인 시스템 반영 리빌드)
-// 변경점 (v1 대비):
-//   - Figma 파일(BYLINE Widget Design) 확인 후 전면 재작업
-//   - Vol 카드형 그리드 → 요일 헤더(M T W T F S S) + 주간 캘린더 그리드로 교체
-//   - 세리프 마스트헤드 → Inter 계열 산세리프로 교체 (Figma 타이포 스펙)
-//   - 컬러: Ink(#1A1A1A) / Cream(#FAFAF8) / Stone(따뜻한 베이지) / Mist(#9E9E9E)
-//   - 신규 기능: 발행 취소 버튼, 6~7월 목업데이터(7:3 비율), 세로/가로 모드,
-//     라이트/다크 모드 토글
+// BYLINE 위젯 프로토타입 — v3
+// 변경 이력:
+//   v1: 최초 프로토타입 (Vol 카드형 아카이브 그리드, Figma 확인 전)
+//   v2: Figma 디자인 시스템(Ink/Cream/Stone/Mist, Inter) 반영 리빌드
+//       (요일 캘린더 그리드, 발행취소, 목업데이터, 세로·가로/라이트·다크 토글)
+//   v3: 1주차 기획 원안(미완료=점선 빈 칸) 재정렬 +
+//       최근 발행일 공백 경고 장치 추가
+//
+// ⚠️ 저장 방식 주의:
+//   지금은 Claude 아티팩트 전용 window.storage API로 임시 저장 중입니다.
+//   실제 Notion 임베드로 배포할 때는 이 부분을 교체해야 합니다.
+//   (관련 결정 대기 중: GitHub 이슈 #1 "노션 API 연동 방식 결정")
+//   → 배포 시 Notion API 직접 연동 / 자체 백엔드 DB 중 하나로 교체 필요
 // ============================================================
 
 import React, { useState, useEffect, useMemo } from 'react';
 
+// ---- Figma 기준 디자인 토큰 ----
 const THEME = {
   light: {
     bg: '#FAFAF8',
     text: '#1A1A1A',
     muted: '#9E9E9E',
     filled: '#1A1A1A',
-    empty: '#ECE6D8', // 따뜻한 베이지 (미완료, 가시성 확보)
     border: '#1A1A1A',
-    divider: '#E0E0E0',
+    divider: '#E0E0E0', // 미완료 셀 점선 색상으로도 사용
   },
   dark: {
     bg: '#141414',
     text: '#F5F3EC',
     muted: '#8C8C8C',
     filled: '#F5F3EC',
-    empty: '#2A2823',
     border: '#F5F3EC',
     divider: '#2E2E2E',
   },
@@ -77,6 +81,7 @@ export default function Byline() {
     let mounted = true;
     (async () => {
       try {
+        // 프로토타입 임시 저장소 — 실배포 시 Notion API 등으로 교체 예정
         const res = await window.storage.get('byline-today-published');
         if (mounted && res?.value === 'true') setTodayPublished(true);
       } catch (e) {
@@ -103,6 +108,10 @@ export default function Byline() {
 
   const volCount = mockRecords.filter((r) => r.completed).length;
   const lastCompleted = [...mockRecords].reverse().find((r) => r.completed);
+  const gapDays = lastCompleted
+    ? Math.round((today - lastCompleted.date) / 86400000)
+    : null;
+  const isStale = gapDays !== null && gapDays >= 3;
 
   async function handlePublish() {
     setTodayPublished(true);
@@ -172,10 +181,17 @@ export default function Byline() {
     <div>
       <div
         className="font-sans"
-        style={{ fontSize: 12, color: T.muted, marginBottom: 10 }}
+        style={{
+          fontSize: 12,
+          color: isStale ? T.text : T.muted,
+          fontWeight: isStale ? 600 : 400,
+          marginBottom: 10,
+        }}
       >
         {lastCompleted
-          ? `최근 발행: ${fmt(lastCompleted.date)}`
+          ? `${isStale ? '⚠ ' : ''}최근 발행: ${fmt(lastCompleted.date)}${
+              isStale ? ` · ${gapDays}일째 공백` : ''
+            }`
           : '아직 발행 기록이 없어요'}
       </div>
       {!todayPublished ? (
@@ -236,8 +252,12 @@ export default function Byline() {
                   title={`${fmt(day.date)} · ${day.completed ? '완료' : '미완료'}`}
                   style={{
                     aspectRatio: '1 / 1',
-                    background: day.completed ? T.filled : T.empty,
-                    border: isToday ? `2px solid ${T.border}` : 'none',
+                    background: day.completed ? T.filled : 'transparent',
+                    border: isToday
+                      ? `2px solid ${T.border}`
+                      : day.completed
+                      ? 'none'
+                      : `1px dashed ${T.divider}`,
                     boxSizing: 'border-box',
                   }}
                 />
