@@ -1,43 +1,86 @@
 // ============================================================
-// BYLINE 위젯 프로토타입 — v1 (최초 작성본)
-// 컨셉: Vol 카드형 아카이브 그리드 + 뉴스룸 스탬프 톤
-// 배경: 1주차 기획서만 참고, Figma 확인 전 상태에서 작성
+// BYLINE 위젯 프로토타입 — v2 (Figma 디자인 시스템 반영 리빌드)
+// 변경점 (v1 대비):
+//   - Figma 파일(BYLINE Widget Design) 확인 후 전면 재작업
+//   - Vol 카드형 그리드 → 요일 헤더(M T W T F S S) + 주간 캘린더 그리드로 교체
+//   - 세리프 마스트헤드 → Inter 계열 산세리프로 교체 (Figma 타이포 스펙)
+//   - 컬러: Ink(#1A1A1A) / Cream(#FAFAF8) / Stone(따뜻한 베이지) / Mist(#9E9E9E)
+//   - 신규 기능: 발행 취소 버튼, 6~7월 목업데이터(7:3 비율), 세로/가로 모드,
+//     라이트/다크 모드 토글
 // ============================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 
-const PAPER = '#F7F6F2';
-const PAPER_FILLED = '#EDEBE4';
-const INK = '#1A1A1A';
-const RULE = '#D8D6CF';
-const STAMP = '#B23A2E';
-const MUTED = '#726F68';
+const THEME = {
+  light: {
+    bg: '#FAFAF8',
+    text: '#1A1A1A',
+    muted: '#9E9E9E',
+    filled: '#1A1A1A',
+    empty: '#ECE6D8', // 따뜻한 베이지 (미완료, 가시성 확보)
+    border: '#1A1A1A',
+    divider: '#E0E0E0',
+  },
+  dark: {
+    bg: '#141414',
+    text: '#F5F3EC',
+    muted: '#8C8C8C',
+    filled: '#F5F3EC',
+    empty: '#2A2823',
+    border: '#F5F3EC',
+    divider: '#2E2E2E',
+  },
+};
+
 const AUTHOR = 'Lania Lee';
+const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
-function pad2(n) {
-  return String(n).padStart(2, '0');
+function pad3(n) {
+  return String(n).padStart(3, '0');
+}
+function dateKey(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
+    d.getDate()
+  ).padStart(2, '0')}`;
+}
+function fmt(d) {
+  return dateKey(d).replaceAll('-', '.');
+}
+function addDays(d, n) {
+  const nd = new Date(d);
+  nd.setDate(nd.getDate() + n);
+  return nd;
 }
 
-function todayKey(d = new Date()) {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+// 2026.06.01(월) ~ 2026.07.25 = 정확히 8주(56일). 오늘(07.26)은 별도 상호작용 셀로 처리.
+const RANGE_START = new Date(2026, 5, 1);
+const MOCK_DAYS = 56;
+
+// 완료:미완료 = 7:3 비율의 결정적 목업 패턴 (10일 주기 중 3일 미완료)
+function mockCompleted(index) {
+  const r = index % 10;
+  return r !== 2 && r !== 6 && r !== 9;
 }
 
 export default function Byline() {
-  const [records, setRecords] = useState([]); // [{ vol, dateKey }]
+  const [theme, setTheme] = useState('light');
+  const [orientation, setOrientation] = useState('portrait');
   const [loaded, setLoaded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [stamping, setStamping] = useState(false);
+  const [todayPublished, setTodayPublished] = useState(false);
+  const [justPublished, setJustPublished] = useState(false);
+
+  const T = THEME[theme];
+  const today = useMemo(() => new Date(2026, 6, 26), []); // 2026.07.26
+  const todayKeyStr = dateKey(today);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
-        const res = await window.storage.get('byline-records');
-        if (mounted && res?.value) {
-          setRecords(JSON.parse(res.value));
-        }
+        const res = await window.storage.get('byline-today-published');
+        if (mounted && res?.value === 'true') setTodayPublished(true);
       } catch (e) {
-        // 키가 아직 없는 최초 상태 - 정상
+        // 아직 저장된 값 없음 - 정상
       } finally {
         if (mounted) setLoaded(true);
       }
@@ -47,150 +90,239 @@ export default function Byline() {
     };
   }, []);
 
-  const todayStr = todayKey();
-  const alreadyPublished = records.some((r) => r.dateKey === todayStr);
-  const lastRecord = records[records.length - 1];
+  // 6/1 ~ 7/25 목업 데이터 + 오늘(7/26)은 실시간 상태
+  const mockRecords = useMemo(() => {
+    const arr = [];
+    for (let i = 0; i < MOCK_DAYS; i++) {
+      const d = addDays(RANGE_START, i);
+      arr.push({ date: d, key: dateKey(d), completed: mockCompleted(i) });
+    }
+    arr.push({ date: today, key: todayKeyStr, completed: todayPublished });
+    return arr;
+  }, [todayPublished, today, todayKeyStr]);
+
+  const volCount = mockRecords.filter((r) => r.completed).length;
+  const lastCompleted = [...mockRecords].reverse().find((r) => r.completed);
 
   async function handlePublish() {
-    if (alreadyPublished || saving) return;
-    const newRecord = { vol: records.length + 1, dateKey: todayStr };
-    const updated = [...records, newRecord];
-
-    setSaving(true);
-    setRecords(updated);
-    setStamping(true);
-
+    setTodayPublished(true);
+    setJustPublished(true);
     try {
-      const result = await window.storage.set(
-        'byline-records',
-        JSON.stringify(updated)
-      );
-      if (!result) {
-        console.error('저장 실패: 결과 없음');
-      }
+      await window.storage.set('byline-today-published', 'true');
     } catch (e) {
       console.error('저장 실패', e);
-    } finally {
-      setSaving(false);
-      setTimeout(() => setStamping(false), 1100);
     }
   }
 
-  const gridItems = [...records];
-  if (!alreadyPublished) {
-    gridItems.push({ vol: records.length + 1, dateKey: todayStr, pending: true });
+  async function handleCancel() {
+    setTodayPublished(false);
+    setJustPublished(false);
+    try {
+      await window.storage.set('byline-today-published', 'false');
+    } catch (e) {
+      console.error('취소 저장 실패', e);
+    }
+  }
+
+  // 주 단위로 묶기 (7일씩)
+  const weeks = [];
+  for (let i = 0; i < mockRecords.length; i += 7) {
+    weeks.push(mockRecords.slice(i, i + 7));
   }
 
   if (!loaded) {
     return (
       <div
-        style={{ background: PAPER, minHeight: '100vh', color: MUTED }}
-        className="flex items-center justify-center"
+        style={{ background: T.bg, color: T.muted, minHeight: '100vh' }}
+        className="flex items-center justify-center font-sans"
       >
         <span className="text-sm tracking-widest uppercase">Loading…</span>
       </div>
     );
   }
 
-  return (
-    <div
-      style={{ background: PAPER, color: INK, minHeight: '100vh' }}
-      className="flex justify-center px-4 py-10"
-    >
-      <div className="w-full max-w-md">
-        {/* 마스트헤드 */}
-        <div
-          style={{ borderTop: `3px solid ${INK}`, borderBottom: `1px solid ${INK}` }}
-          className="pt-3 pb-3 text-center"
+  const isLandscape = orientation === 'landscape';
+
+  const Masthead = (
+    <div>
+      <div className="flex items-end justify-between">
+        <h1
+          className="font-sans font-bold tracking-tight"
+          style={{ fontSize: 28, color: T.text, lineHeight: 1 }}
         >
+          BYLINE
+        </h1>
+        <span
+          className="font-sans font-medium"
+          style={{ fontSize: 12, color: T.muted }}
+        >
+          Vol.{pad3(volCount)}
+        </span>
+      </div>
+      <div
+        className="font-sans mt-1"
+        style={{ fontSize: 14, color: T.muted }}
+      >
+        By {AUTHOR}
+      </div>
+    </div>
+  );
+
+  const Footer = (
+    <div>
+      <div
+        className="font-sans"
+        style={{ fontSize: 12, color: T.muted, marginBottom: 10 }}
+      >
+        {lastCompleted
+          ? `최근 발행: ${fmt(lastCompleted.date)}`
+          : '아직 발행 기록이 없어요'}
+      </div>
+      {!todayPublished ? (
+        <button
+          onClick={handlePublish}
+          className="w-full py-2.5 font-sans font-semibold transition-opacity"
+          style={{
+            fontSize: 13,
+            background: T.filled,
+            color: T.bg,
+            border: 'none',
+            cursor: 'pointer',
+          }}
+        >
+          오늘의 BYLINE 발행하기
+        </button>
+      ) : (
+        <div className="flex flex-col gap-1.5 items-center">
           <div
-            className="text-[10px] tracking-[0.3em] uppercase"
-            style={{ color: MUTED }}
+            className="w-full py-2.5 text-center font-sans font-semibold"
+            style={{ fontSize: 13, background: T.filled, color: T.bg }}
           >
-            Daily Transcription Record
+            오늘의 BYLINE이 발행되었습니다 ✓
           </div>
-          <h1 className="font-serif text-5xl tracking-tight mt-1">BYLINE</h1>
-          <div className="font-serif italic text-sm mt-1" style={{ color: MUTED }}>
-            By {AUTHOR}
-          </div>
-        </div>
-
-        {/* 데이트라인 */}
-        <div
-          style={{ borderBottom: `1px solid ${RULE}` }}
-          className="flex justify-between items-center py-3 text-xs"
-        >
-          <span className="uppercase tracking-widest" style={{ color: MUTED }}>
-            Vol. Archive
-          </span>
-          <span style={{ color: MUTED }}>
-            {lastRecord
-              ? `최근 발행: ${lastRecord.dateKey.replaceAll('-', '.')}`
-              : '아직 발행 기록이 없어요'}
-          </span>
-        </div>
-
-        {/* 아카이브 그리드 */}
-        <div className="grid grid-cols-4 gap-2 mt-5">
-          {records.length === 0 && (
-            <div
-              className="col-span-4 text-center py-8 text-sm"
-              style={{ color: MUTED }}
-            >
-              첫 필사를 마치고 오늘의 BYLINE을 발행해보세요.
-            </div>
-          )}
-          {gridItems.map((item) => {
-            const isToday = item.dateKey === todayStr;
-            const isPending = Boolean(item.pending);
-            return (
-              <div
-                key={`${item.vol}-${item.dateKey}`}
-                className="aspect-square flex flex-col items-center justify-center rounded-none text-center"
-                style={{
-                  border: isToday ? `2px solid ${STAMP}` : `1px solid ${RULE}`,
-                  borderStyle: isPending ? 'dashed' : 'solid',
-                  background: isPending ? 'transparent' : PAPER_FILLED,
-                }}
-              >
-                <span
-                  className="text-[10px] tracking-wider"
-                  style={{ color: isPending ? MUTED : INK }}
-                >
-                  VOL.{pad2(item.vol)}
-                </span>
-                <span className="text-[9px] mt-1" style={{ color: MUTED }}>
-                  {isPending ? '—' : item.dateKey.slice(5).replace('-', '.')}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* 발행 버튼 */}
-        <div className="mt-8 flex flex-col items-center">
           <button
-            onClick={handlePublish}
-            disabled={alreadyPublished || saving}
-            className="w-full py-3 text-sm tracking-widest uppercase transition-opacity"
+            onClick={handleCancel}
+            className="font-sans underline underline-offset-2"
+            style={{ fontSize: 11, color: T.muted, background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            오늘 발행 취소
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  const Grid = (
+    <div>
+      <div className="grid grid-cols-7 gap-[3px] mb-1.5">
+        {WEEKDAYS.map((w, i) => (
+          <div
+            key={i}
+            className="text-center font-sans"
+            style={{ fontSize: 11, color: T.muted }}
+          >
+            {w}
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-col gap-[3px]">
+        {weeks.map((week, wi) => (
+          <div key={wi} className="grid grid-cols-7 gap-[3px]">
+            {week.map((day) => {
+              const isToday = day.key === todayKeyStr;
+              return (
+                <div
+                  key={day.key}
+                  title={`${fmt(day.date)} · ${day.completed ? '완료' : '미완료'}`}
+                  style={{
+                    aspectRatio: '1 / 1',
+                    background: day.completed ? T.filled : T.empty,
+                    border: isToday ? `2px solid ${T.border}` : 'none',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const Controls = (
+    <div className="flex items-center justify-between mb-4 font-sans" style={{ fontSize: 11 }}>
+      <div className="flex gap-1">
+        {['portrait', 'landscape'].map((o) => (
+          <button
+            key={o}
+            onClick={() => setOrientation(o)}
             style={{
-              border: `1px solid ${INK}`,
-              color: alreadyPublished ? MUTED : INK,
-              background: 'transparent',
-              cursor: alreadyPublished ? 'default' : 'pointer',
-              opacity: alreadyPublished ? 0.6 : 1,
+              padding: '3px 8px',
+              border: `1px solid ${T.divider}`,
+              background: orientation === o ? T.text : 'transparent',
+              color: orientation === o ? T.bg : T.muted,
+              cursor: 'pointer',
             }}
           >
-            {alreadyPublished ? '오늘은 이미 발행했어요' : '오늘의 BYLINE 발행하기'}
+            {o === 'portrait' ? '세로' : '가로'}
           </button>
+        ))}
+      </div>
+      <div className="flex gap-1">
+        {['light', 'dark'].map((t) => (
+          <button
+            key={t}
+            onClick={() => setTheme(t)}
+            style={{
+              padding: '3px 8px',
+              border: `1px solid ${T.divider}`,
+              background: theme === t ? T.text : 'transparent',
+              color: theme === t ? T.bg : T.muted,
+              cursor: 'pointer',
+            }}
+          >
+            {t === 'light' ? '라이트' : '다크'}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 
-          {stamping && (
-            <div
-              className="mt-3 text-xs tracking-[0.3em] uppercase"
-              style={{ color: STAMP }}
-            >
-              ★ Published — Vol.{pad2(records.length)} ★
-            </div>
+  return (
+    <div
+      style={{ background: theme === 'light' ? '#F0EEE8' : '#0A0A0A', minHeight: '100vh' }}
+      className="flex items-center justify-center p-6"
+    >
+      <div style={{ width: isLandscape ? 560 : 320 }}>
+        {Controls}
+        <div
+          style={{
+            background: T.bg,
+            color: T.text,
+            padding: 20,
+            border: `1px solid ${T.divider}`,
+          }}
+          className={isLandscape ? 'flex gap-8 items-stretch' : ''}
+        >
+          {isLandscape ? (
+            <>
+              <div className="flex flex-col justify-between" style={{ width: 180 }}>
+                {Masthead}
+                <div style={{ borderTop: `1px solid ${T.divider}`, marginTop: 16, paddingTop: 16 }}>
+                  {Footer}
+                </div>
+              </div>
+              <div style={{ borderLeft: `1px solid ${T.divider}` }} />
+              <div className="flex-1 flex items-center">{Grid}</div>
+            </>
+          ) : (
+            <>
+              {Masthead}
+              <div style={{ borderTop: `1px solid ${T.divider}`, margin: '16px 0' }} />
+              {Grid}
+              <div style={{ borderTop: `1px solid ${T.divider}`, margin: '16px 0' }} />
+              {Footer}
+            </>
           )}
         </div>
       </div>
