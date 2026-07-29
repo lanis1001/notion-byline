@@ -35,6 +35,7 @@ export interface NotionOAuthTokenResult {
   workspace_id: string;
   workspace_name: string;
   bot_id: string;
+  owner?: { type: string; user?: { name?: string } };
 }
 
 /** 콜백에서 받은 code를 access_token으로 교환 */

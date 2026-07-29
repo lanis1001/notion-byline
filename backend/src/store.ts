@@ -10,6 +10,7 @@ export interface UserNotionConnection {
   workspaceId: string;
   workspaceName: string;
   botId: string;
+  userName?: string;
   databaseId?: string;
   titleProperty?: string;
   dateProperty?: string;

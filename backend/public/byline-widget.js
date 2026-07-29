@@ -40,8 +40,9 @@ const THEME = {
   },
 };
 
-const AUTHOR = 'Lania Lee';
 const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const SIZE_SCALE = { sm: 0.82, md: 1, lg: 1.2 };
+const SIZE_LABELS = { sm: '작게', md: '기본', lg: '크게' };
 const KO_WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 function todayDate() {
@@ -113,6 +114,7 @@ async function apiDelete(path) {
 function Byline() {
   const [theme, setTheme] = useState('light');
   const [orientation, setOrientation] = useState('portrait');
+  const [size, setSize] = useState('md'); // 'sm' | 'md' | 'lg'
   const [viewMode, setViewMode] = useState('month'); // 'day' | 'week' | 'month'
   const [monthCursor, setMonthCursor] = useState(new Date(TODAY.getFullYear(), TODAY.getMonth(), 1));
   const todayKey = dk(TODAY);
@@ -309,7 +311,7 @@ function Byline() {
       </div>
       <div className="flex justify-between items-center mt-1.5">
         <span data-serif style={{ fontFamily: '"Cormorant Garamond", Georgia, serif', fontStyle: 'italic', fontSize: 13, color: T.muted }}>
-          By {AUTHOR}
+          By {status?.userName || status?.workspaceName || '나'}
         </span>
         <span className="font-sans" style={{ fontSize: 10, color: T.muted, letterSpacing: '0.1em' }}>
           DAILY TRANSCRIPTION RECORD
@@ -518,11 +520,18 @@ function Byline() {
   );
 
   const Controls = (
-    <div className="flex items-center justify-between mb-3 font-sans" style={{ fontSize: 11 }}>
+    <div className="flex items-center justify-between mb-3 font-sans flex-wrap gap-2" style={{ fontSize: 11 }}>
       <div className="flex gap-1">
         {['portrait', 'landscape'].map((o) => (
           <ToggleBtn key={o} active={orientation === o} onClick={() => setOrientation(o)} T={T}>
             {o === 'portrait' ? '세로' : '가로'}
+          </ToggleBtn>
+        ))}
+      </div>
+      <div className="flex gap-1">
+        {['sm', 'md', 'lg'].map((s) => (
+          <ToggleBtn key={s} active={size === s} onClick={() => setSize(s)} T={T}>
+            {SIZE_LABELS[s]}
           </ToggleBtn>
         ))}
       </div>
@@ -548,7 +557,7 @@ function Byline() {
 
   return (
     <div
-      style={{ background: theme === 'light' ? '#E7DFD4' : '#0A0A0A', minHeight: '100vh' }}
+      style={{ background: 'transparent', minHeight: '100vh' }}
       className="byline-widget-root flex items-center justify-center p-6"
     >
       <style>{`
@@ -556,7 +565,7 @@ function Byline() {
         .byline-widget-root, .byline-widget-root * { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif !important; }
         .byline-widget-root h1, .byline-widget-root [data-serif] { font-family: 'Cormorant Garamond', Georgia, serif !important; }
       `}</style>
-      <div style={{ width: isLandscape ? 620 : 320 }}>
+      <div style={{ width: isLandscape ? 620 : 320, transform: `scale(${SIZE_SCALE[size]})`, transformOrigin: 'top center' }}>
         {Controls}
         <div style={{ background: T.bg, color: T.ink, padding: 22, boxShadow: T.vignette }}>
           {Masthead}
@@ -584,7 +593,7 @@ function GateScreen({ T, children }) {
   return (
     <div
       className="byline-widget-root flex items-center justify-center p-6 font-sans text-center"
-      style={{ background: '#E7DFD4', minHeight: '100vh' }}
+      style={{ background: 'transparent', minHeight: '100vh' }}
     >
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');

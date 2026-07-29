@@ -16,10 +16,10 @@ export interface PublishRecord {
 // 요청마다 req.session에 저장된 사용자별 accessToken/databaseId로 client를 새로 만들어 넘겨줌.
 //
 // "발행"의 의미: 필사 일지 DB에서 해당 날짜 카드의 완료 체크박스를 켜는 것.
-// 아직 그날 카드가 없으면 최소 카드(제목=날짜)를 새로 만들고 체크박스를 켠다 —
-// 실제 원문/필사 내용은 사용자가 Notion에서 직접 채워 넣는다 (이 앱은 대신 쓰지 않음).
-// "발행 취소"는 체크박스를 끄는 것뿐이며, 카드 자체는 절대 삭제/보관 처리하지 않는다 —
-// 사용자가 이미 작성한 필사 내용을 보존하기 위함.
+// 아직 그날 카드가 없으면 제목은 비워두고 날짜만 채운 카드를 새로 만든다 —
+// 실제 제목/원문/필사 내용은 사용자가 Notion에서 직접 채워 넣는다 (이 앱은 대신 쓰지 않음).
+// "발행 취소"는 그날 카드를 Notion 휴지통으로 보낸다(archived: true, 복구 가능) —
+// BYLINE이 만든 빈 카드가 DB에 남아 어지럽히지 않도록 하기 위함.
 
 export async function listPublishRecords(
   notion: Client,
@@ -83,7 +83,7 @@ export async function createPublishRecord(
   const page = await notion.pages.create({
     parent: { database_id: cfg.databaseId },
     properties: {
-      [cfg.titleProperty]: { title: [{ text: { content: date } }] },
+      [cfg.titleProperty]: { title: [] },
       [cfg.dateProperty]: { date: { start: date } },
       [cfg.checkboxProperty]: { checkbox: true },
     },
@@ -99,9 +99,9 @@ export async function cancelPublishRecord(
 ): Promise<void> {
   const existing = await findRecordByDate(notion, cfg, date);
   if (!existing) return;
-  // 체크박스만 끈다 — 카드를 보관 처리하면 사용자가 써둔 필사 내용이 통째로 사라지므로 금지.
+  // 카드를 Notion 휴지통으로 보낸다 (완전 영구삭제가 아니라 archived — Notion에서 복구 가능).
   await notion.pages.update({
     page_id: existing.pageId,
-    properties: { [cfg.checkboxProperty]: { checkbox: false } },
+    archived: true,
   });
 }

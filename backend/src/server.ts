@@ -85,6 +85,7 @@ app.get("/auth/notion/callback", async (req, res) => {
       workspaceId: token.workspace_id,
       workspaceName: token.workspace_name,
       botId: token.bot_id,
+      userName: token.owner?.type === "user" ? token.owner.user?.name : undefined,
     });
 
     // 배포 시: 프론트엔드의 "설정 완료" 화면으로 리다이렉트
@@ -106,7 +107,12 @@ app.get("/api/status", async (req, res) => {
     return res.json({ connected: true, needsDatabaseSetup: true, databases });
   }
 
-  res.json({ connected: true, needsDatabaseSetup: false, workspaceName: conn.workspaceName });
+  res.json({
+    connected: true,
+    needsDatabaseSetup: false,
+    workspaceName: conn.workspaceName,
+    userName: conn.userName,
+  });
 });
 
 // 구매자가 위 목록에서 필사 일지(또는 같은 모양의) DB를 고르면 그 DB에 연결
