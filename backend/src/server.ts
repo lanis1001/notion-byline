@@ -1,5 +1,6 @@
 import "dotenv/config";
 import crypto from "crypto";
+import path from "path";
 import express from "express";
 import session from "express-session";
 import { Client } from "@notionhq/client";
@@ -45,6 +46,10 @@ app.use((req, res, next) => {
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
+
+// 위젯 화면(index.html + byline-widget.js) 서빙. 같은 서버가 API와 위젯을
+// 함께 제공하므로 fetch()가 같은 origin(상대경로)으로 동작한다.
+app.use(express.static(path.join(__dirname, "..", "public")));
 
 function requireConnection(req: express.Request, res: express.Response) {
   const conn = getConnection(req.sessionID);
