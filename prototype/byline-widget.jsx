@@ -1,5 +1,5 @@
 // ============================================================
-// BYLINE 위젯 프로토타입 — v4
+// BYLINE 위젯 프로토타입 — v5
 // 변경 이력:
 //   v1: 최초 프로토타입 (Vol 카드형 아카이브 그리드, Figma 확인 전)
 //   v2: Figma 디자인 시스템 반영 리빌드 (요일 캘린더 그리드, 발행취소,
@@ -11,6 +11,9 @@
 //       - 일/주/월 보기 모드 추가
 //       - 날짜 클릭 → Vol 확인, 발행 취소/수정(상세 패널)
 //       - 마스트헤드 데이트라인, 이중 룰선, 오늘 스탬프 배지 추가
+//   v5: LÉTRA 템플릿 통합 — BYLINE을 LÉTRA(하루 한 장 뉴스 필사) 브랜드
+//       팔레트/타이포로 리스킨 (Ivory/Black/Warm Gray/Paper Beige,
+//       Cormorant Garamond + Inter). 스탬프 포인트 컬러는 기존 유지.
 //
 // ⚠️ 저장 방식: 여전히 Claude 아티팩트 전용 window.storage 사용 (프로토타입).
 //    실배포 시 Notion API 등으로 교체 필요 (GitHub 이슈 #1 의존)
@@ -18,34 +21,35 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 
+// LÉTRA 브랜드 팔레트: Ivory #F5F1E8 · Black #111111 · Warm Gray #B8B1A7 · Paper Beige #E7DFD4
 const THEME = {
   light: {
     label: '주간판',
-    bg: '#F2ECDE',
-    ink: '#22201B',
-    muted: '#8A806D',
-    rule: '#C9BFA8',
-    filled: '#22201B',
-    onFilled: '#F2ECDE',
-    emptyTint: 'rgba(34,32,27,0.07)',
-    emptyBorder: '#B9AD90',
+    bg: '#F5F1E8',
+    ink: '#111111',
+    muted: '#B8B1A7',
+    rule: '#E7DFD4',
+    filled: '#111111',
+    onFilled: '#F5F1E8',
+    emptyTint: 'rgba(17,17,17,0.06)',
+    emptyBorder: '#B8B1A7',
     accent: '#8B2E2A',
-    vignette: 'inset 0 0 70px rgba(34,32,27,0.08)',
-    disabled: '#C9BFA8',
+    vignette: 'inset 0 0 70px rgba(17,17,17,0.06)',
+    disabled: '#E7DFD4',
   },
   dark: {
     label: '야간판',
-    bg: '#1C1A16',
-    ink: '#EDE6D3',
-    muted: '#A79C87',
-    rule: '#3A362C',
-    filled: '#EDE6D3',
-    onFilled: '#1C1A16',
-    emptyTint: 'rgba(237,230,211,0.08)',
-    emptyBorder: '#4A4438',
+    bg: '#111111',
+    ink: '#F5F1E8',
+    muted: '#B8B1A7',
+    rule: '#2A2A28',
+    filled: '#F5F1E8',
+    onFilled: '#111111',
+    emptyTint: 'rgba(245,241,232,0.08)',
+    emptyBorder: '#4A4640',
     accent: '#D9736D',
-    vignette: 'inset 0 0 90px rgba(0,0,0,0.55)',
-    disabled: '#3A362C',
+    vignette: 'inset 0 0 90px rgba(0,0,0,0.6)',
+    disabled: '#2A2A28',
   },
 };
 
@@ -211,13 +215,13 @@ export default function Byline() {
         <span>{fmtKorean(TODAY).toUpperCase()}</span>
       </div>
       <div className="flex items-end justify-between mt-1">
-        <h1 style={{ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: 34, color: T.ink, lineHeight: 1, fontWeight: 700 }}>
+        <h1 style={{ fontFamily: '"Cormorant Garamond", Georgia, serif', fontSize: 34, color: T.ink, lineHeight: 1, fontWeight: 700 }}>
           BYLINE
         </h1>
         <StampBadge visible={selected === todayKey} T={T} />
       </div>
       <div className="flex justify-between items-center mt-1.5">
-        <span style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', fontSize: 13, color: T.muted }}>
+        <span data-serif style={{ fontFamily: '"Cormorant Garamond", Georgia, serif', fontStyle: 'italic', fontSize: 13, color: T.muted }}>
           By {AUTHOR}
         </span>
         <span className="font-sans" style={{ fontSize: 10, color: T.muted, letterSpacing: '0.1em' }}>
@@ -344,7 +348,7 @@ export default function Byline() {
           </button>
           <div>
             <div className="font-sans" style={{ fontSize: 12, color: T.muted }}>{fmtKorean(selectedDate)}</div>
-            <div style={{ fontFamily: 'Georgia, serif', fontSize: 40, color: T.ink, fontWeight: 700, margin: '4px 0' }}>
+            <div data-serif style={{ fontFamily: '"Cormorant Garamond", Georgia, serif', fontSize: 40, color: T.ink, fontWeight: 700, margin: '4px 0' }}>
               {completed ? `Vol.${pad3(vol)}` : '—'}
             </div>
             <div className="font-sans" style={{ fontSize: 12, color: T.muted }}>{completed ? '발행 완료' : '미발행'}</div>
@@ -453,7 +457,15 @@ export default function Byline() {
   );
 
   return (
-    <div style={{ background: theme === 'light' ? '#E9E3D2' : '#0C0B09', minHeight: '100vh' }} className="flex items-center justify-center p-6">
+    <div
+      style={{ background: theme === 'light' ? '#E7DFD4' : '#0A0A0A', minHeight: '100vh' }}
+      className="byline-widget-root flex items-center justify-center p-6"
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
+        .byline-widget-root, .byline-widget-root * { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif !important; }
+        .byline-widget-root h1, .byline-widget-root [data-serif] { font-family: 'Cormorant Garamond', Georgia, serif !important; }
+      `}</style>
       <div style={{ width: isLandscape ? 620 : 320 }}>
         {Controls}
         <div style={{ background: T.bg, color: T.ink, padding: 22, boxShadow: T.vignette }}>
