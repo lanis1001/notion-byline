@@ -2,11 +2,10 @@ import "dotenv/config";
 import crypto from "crypto";
 import path from "path";
 import express from "express";
-import session from "express-session";
+import cookieSession from "cookie-session";
 import { Client } from "@notionhq/client";
 
 import { getAuthorizeUrl, exchangeCodeForToken } from "./notionOAuth";
-import { getConnection, saveConnection, deleteConnection } from "./store";
 import { listAccessibleDatabases, connectExistingDatabase } from "./setup";
 import {
   listPublishRecords,
@@ -15,10 +14,19 @@ import {
   DbConfig,
 } from "./publishRepository";
 
-declare module "express-session" {
-  interface SessionData {
-    oauthState?: string;
-  }
+// 연결 정보는 서버가 아니라 서명된 쿠키에 저장한다 (Render 무료 티어는 재시작/재배포마다
+// 로컬 파일시스템이 초기화되므로, 서버 쪽에 저장하면 매번 다시 로그인해야 했음).
+// 쿠키에 담기는 값은 SESSION_SECRET으로 서명되고 httpOnly라 자바스크립트로 읽을 수 없다.
+export interface UserNotionConnection {
+  accessToken: string;
+  workspaceId: string;
+  workspaceName: string;
+  botId: string;
+  userName?: string;
+  databaseId?: string;
+  titleProperty?: string;
+  dateProperty?: string;
+  checkboxProperty?: string;
 }
 
 const app = express();
@@ -26,15 +34,13 @@ app.use(express.json());
 app.set("trust proxy", 1);
 
 app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "dev-secret-change-me",
-    resave: false,
-    saveUninitialized: true,
-    cookie: {
-      httpOnly: true,
-      sameSite: "none", // 위젯이 Notion 페이지 iframe 안에서 호출하므로 필요
-      secure: true, // 배포 시 HTTPS 필수 (secure 쿠키는 HTTP에서 저장 안 됨)
-    },
+  cookieSession({
+    name: "byline_session",
+    keys: [process.env.SESSION_SECRET || "dev-secret-change-me"],
+    maxAge: 90 * 24 * 60 * 60 * 1000, // 90일 — 브라우저에 저장되므로 서버 재시작과 무관하게 유지됨
+    httpOnly: true,
+    sameSite: "none", // 위젯이 Notion 페이지 iframe 안에서 호출하므로 필요
+    secure: true, // 배포 시 HTTPS 필수 (secure 쿠키는 HTTP에서 저장 안 됨)
   })
 );
 
@@ -51,8 +57,12 @@ app.use((req, res, next) => {
 // 함께 제공하므로 fetch()가 같은 origin(상대경로)으로 동작한다.
 app.use(express.static(path.join(__dirname, "..", "public")));
 
+function getConnection(req: express.Request): UserNotionConnection | undefined {
+  return req.session?.connection as UserNotionConnection | undefined;
+}
+
 function requireConnection(req: express.Request, res: express.Response) {
-  const conn = getConnection(req.sessionID);
+  const conn = getConnection(req);
   if (!conn) {
     res.status(401).json({ error: "Notion 연결이 필요합니다.", needsAuth: true });
     return null;
@@ -63,30 +73,31 @@ function requireConnection(req: express.Request, res: express.Response) {
 // 1) 구매자가 위젯에서 이 URL로 이동 → Notion 로그인/승인 화면으로 리다이렉트
 app.get("/auth/notion", (req, res) => {
   const state = crypto.randomBytes(16).toString("hex");
-  req.session.oauthState = state;
+  req.session!.oauthState = state;
   res.redirect(getAuthorizeUrl(state));
 });
 
-// 2) Notion이 승인 후 여기로 돌아옴 → 토큰 교환 → 세션에 저장
+// 2) Notion이 승인 후 여기로 돌아옴 → 토큰 교환 → 쿠키에 저장
 app.get("/auth/notion/callback", async (req, res) => {
   const { code, state } = req.query;
 
   if (!code || typeof code !== "string") {
     return res.status(400).send("code가 없습니다.");
   }
-  if (state !== req.session.oauthState) {
+  if (state !== req.session?.oauthState) {
     return res.status(400).send("state 불일치 (CSRF 의심). 다시 시도해주세요.");
   }
 
   try {
     const token = await exchangeCodeForToken(code);
-    saveConnection(req.sessionID, {
+    const connection: UserNotionConnection = {
       accessToken: token.access_token,
       workspaceId: token.workspace_id,
       workspaceName: token.workspace_name,
       botId: token.bot_id,
       userName: token.owner?.type === "user" ? token.owner.user?.name : undefined,
-    });
+    };
+    req.session!.connection = connection;
 
     // 배포 시: 프론트엔드의 "설정 완료" 화면으로 리다이렉트
     res.redirect((process.env.ALLOWED_ORIGIN || "/") + "?connected=1");
@@ -98,7 +109,7 @@ app.get("/auth/notion/callback", async (req, res) => {
 
 // 연결 상태 + (DB 설정 전이면) 선택 가능한 데이터베이스 목록
 app.get("/api/status", async (req, res) => {
-  const conn = getConnection(req.sessionID);
+  const conn = getConnection(req);
   if (!conn) return res.json({ connected: false });
 
   if (!conn.databaseId) {
@@ -126,7 +137,7 @@ app.post("/api/setup/database", async (req, res) => {
   try {
     const notion = new Client({ auth: conn.accessToken });
     const dbConfig = await connectExistingDatabase(notion, databaseId);
-    saveConnection(req.sessionID, { ...conn, ...dbConfig });
+    req.session!.connection = { ...conn, ...dbConfig };
     res.status(201).json({ ok: true });
   } catch (err) {
     console.error("[POST /api/setup/database]", err);
@@ -135,7 +146,7 @@ app.post("/api/setup/database", async (req, res) => {
   }
 });
 
-function toDbConfig(conn: NonNullable<ReturnType<typeof getConnection>>): DbConfig | null {
+function toDbConfig(conn: UserNotionConnection): DbConfig | null {
   if (!conn.databaseId || !conn.titleProperty || !conn.dateProperty || !conn.checkboxProperty) {
     return null;
   }
@@ -195,7 +206,7 @@ app.delete("/api/publish/:date", async (req, res) => {
 });
 
 app.post("/auth/disconnect", (req, res) => {
-  deleteConnection(req.sessionID);
+  req.session = null;
   res.status(204).end();
 });
 

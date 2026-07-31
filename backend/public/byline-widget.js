@@ -85,6 +85,16 @@ function daysInMonth(d) {
   return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
 }
 
+function FontStyles() {
+  return (
+    <style>{`
+      @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
+      .byline-widget-root, .byline-widget-root * { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif !important; }
+      .byline-widget-root h1, .byline-widget-root [data-serif] { font-family: 'Cormorant Garamond', Georgia, serif !important; }
+    `}</style>
+  );
+}
+
 async function apiGet(path) {
   const res = await fetch(path, { credentials: 'include' });
   if (!res.ok) throw new Error(`${path} 요청 실패 (${res.status})`);
@@ -211,7 +221,8 @@ function Byline() {
   // ---------- 연결/설정 전 단계 화면 ----------
   if (status === null && !error) {
     return (
-      <div style={{ background: THEME.light.bg, color: THEME.light.muted, minHeight: '100vh' }} className="flex items-center justify-center font-sans">
+      <div style={{ background: THEME.light.bg, color: THEME.light.muted, minHeight: '100vh' }} className="byline-widget-root flex items-center justify-center">
+        <FontStyles />
         <span className="text-sm tracking-widest uppercase">Loading…</span>
       </div>
     );
@@ -258,7 +269,8 @@ function Byline() {
 
   if (records === null) {
     return (
-      <div style={{ background: T.bg, color: T.muted, minHeight: '100vh' }} className="flex items-center justify-center font-sans">
+      <div style={{ background: T.bg, color: T.muted, minHeight: '100vh' }} className="byline-widget-root flex items-center justify-center">
+        <FontStyles />
         <span className="text-sm tracking-widest uppercase">Loading…</span>
       </div>
     );
@@ -560,11 +572,7 @@ function Byline() {
       style={{ background: 'transparent', minHeight: '100vh' }}
       className="byline-widget-root flex items-center justify-center p-6"
     >
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
-        .byline-widget-root, .byline-widget-root * { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif !important; }
-        .byline-widget-root h1, .byline-widget-root [data-serif] { font-family: 'Cormorant Garamond', Georgia, serif !important; }
-      `}</style>
+      <FontStyles />
       <div style={{ width: isLandscape ? 620 : 320, transform: `scale(${SIZE_SCALE[size]})`, transformOrigin: 'top center' }}>
         {Controls}
         <div style={{ background: T.bg, color: T.ink, padding: 22, boxShadow: T.vignette }}>
@@ -595,10 +603,7 @@ function GateScreen({ T, children }) {
       className="byline-widget-root flex items-center justify-center p-6 font-sans text-center"
       style={{ background: 'transparent', minHeight: '100vh' }}
     >
-      <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;700&family=Inter:wght@400;500;600;700&display=swap');
-        .byline-widget-root, .byline-widget-root * { font-family: 'Inter', ui-sans-serif, system-ui, sans-serif !important; }
-      `}</style>
+      <FontStyles />
       <div style={{ background: T.bg, color: T.ink, padding: 32, width: 320 }}>
         <h1 style={{ fontFamily: '"Cormorant Garamond", Georgia, serif', fontSize: 28, marginBottom: 16 }}>BYLINE</h1>
         {children}

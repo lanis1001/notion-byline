@@ -5,22 +5,43 @@ import { Client } from "@notionhq/client";
 const DATE_PROPERTY_CANDIDATES = ["날짜", "Date"];
 const CHECKBOX_PROPERTY_CANDIDATES = ["필사 완료", "발행 완료", "완료", "Done", "Published"];
 
-/** OAuth 인증 직후, 사용자가 연결할 기존 데이터베이스를 고르게 하기 위한 목록 조회 */
+/**
+ * OAuth 인증 직후, 사용자가 연결할 기존 데이터베이스를 고르게 하기 위한 목록 조회.
+ * integration이 접근 가능한 모든 DB가 아니라, 날짜+체크박스 속성을 모두 가진(=필사
+ * 일지 같은 모양의) DB만 추려서 보여준다 — 매체 가이드·어휘 노트처럼 무관한 DB나
+ * 검색 결과 중복이 섞여 들어오는 것을 막기 위함. 제목 기준으로도 중복 제거한다.
+ */
 export async function listAccessibleDatabases(notion: Client) {
   const res = await notion.search({
     filter: { property: "object", value: "database" },
     page_size: 50,
   });
 
-  return res.results
-    .filter((r): r is Extract<typeof r, { object: "database" }> => r.object === "database")
-    .map((db) => {
-      const title =
-        "title" in db && Array.isArray(db.title)
-          ? db.title.map((t) => t.plain_text).join("")
-          : "(제목 없음)";
-      return { id: db.id, title, url: (db as { url?: string }).url };
-    });
+  const seenTitles = new Set<string>();
+  const results: { id: string; title: string; url?: string }[] = [];
+
+  for (const r of res.results) {
+    if (r.object !== "database") continue;
+    const db = r as unknown as {
+      id: string;
+      url?: string;
+      title?: { plain_text: string }[];
+      properties?: Record<string, { type: string }>;
+    };
+
+    const properties = db.properties ?? {};
+    const hasDate = Object.values(properties).some((p) => p.type === "date");
+    const hasCheckbox = Object.values(properties).some((p) => p.type === "checkbox");
+    if (!hasDate || !hasCheckbox) continue; // 필사 일지 같은 모양이 아니면 목록에서 제외
+
+    const title = Array.isArray(db.title) ? db.title.map((t) => t.plain_text).join("") : "(제목 없음)";
+    if (seenTitles.has(title)) continue; // 제목 중복 제거
+    seenTitles.add(title);
+
+    results.push({ id: db.id, title, url: db.url });
+  }
+
+  return results;
 }
 
 function findProperty(
