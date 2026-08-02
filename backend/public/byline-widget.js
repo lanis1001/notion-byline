@@ -511,11 +511,14 @@ function Byline() {
     );
   }
 
-  // ---------- 상세 패널 (일 뷰가 아닐 때, 선택된 날짜 요약 + 토글) ----------
+  // ---------- 상세 패널 (일 뷰가 아닐 때, 선택된 날짜 요약) ----------
+  // 과거 날짜는 조회만 가능 — 수동 토글은 오늘 날짜만 허용한다.
+  // (추후 Notion 쪽 자동화와 맞물릴 때 과거 데이터가 수동으로 바뀌면 충돌할 수 있어 이번 버전에서 제외)
   function DetailPanel() {
     const completed = inRange(selectedDate) ? getCompleted(selected) : false;
     const vol = completed ? volAt(selectedDate) : null;
     if (!inRange(selectedDate)) return null;
+    const isToday = selected === todayKey;
     return (
       <div
         className="font-sans"
@@ -525,13 +528,19 @@ function Byline() {
           <span style={{ color: T.ink, fontWeight: 600 }}>{fmtDot(selectedDate)}</span>
           <span style={{ color: T.muted }}>{completed ? `Vol.${pad3(vol)} · 완료` : '미완료'}</span>
         </div>
-        <button
-          onClick={() => toggleDay(selected)}
-          className="mt-2 underline underline-offset-2"
-          style={{ fontSize: 11, color: T.muted, background: 'none', border: 'none', cursor: 'pointer' }}
-        >
-          {completed ? '이 날짜 발행 취소' : '이 날짜 발행으로 표시'}
-        </button>
+        {isToday ? (
+          <button
+            onClick={() => toggleDay(selected)}
+            className="mt-2 underline underline-offset-2"
+            style={{ fontSize: 11, color: T.muted, background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            {completed ? '오늘 발행 취소' : '오늘 발행으로 표시'}
+          </button>
+        ) : (
+          <div className="mt-2" style={{ fontSize: 11, color: T.muted }}>
+            지난 날짜는 Notion의 필사 일지 DB에서 직접 수정하세요.
+          </div>
+        )}
       </div>
     );
   }
