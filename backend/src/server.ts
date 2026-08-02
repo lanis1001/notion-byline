@@ -2,10 +2,10 @@ import "dotenv/config";
 import crypto from "crypto";
 import path from "path";
 import express from "express";
-import cookieSession from "cookie-session";
 import { Client } from "@notionhq/client";
 
 import { getAuthorizeUrl, exchangeCodeForToken } from "./notionOAuth";
+import { sign, verify } from "./token";
 import { listAccessibleDatabases, connectExistingDatabase } from "./setup";
 import {
   listPublishRecords,
@@ -14,9 +14,10 @@ import {
   DbConfig,
 } from "./publishRepository";
 
-// 연결 정보는 서버가 아니라 서명된 쿠키에 저장한다 (Render 무료 티어는 재시작/재배포마다
-// 로컬 파일시스템이 초기화되므로, 서버 쪽에 저장하면 매번 다시 로그인해야 했음).
-// 쿠키에 담기는 값은 SESSION_SECRET으로 서명되고 httpOnly라 자바스크립트로 읽을 수 없다.
+// 연결 정보는 서버에 저장하지 않고, 서명된 토큰으로 클라이언트(localStorage)가 들고 있는다.
+// 이유 1) Render 무료 티어는 재시작/슬립마다 서버 쪽 저장을 날려버림.
+// 이유 2) 쿠키(특히 iframe 안에서 쓰는 서드파티 쿠키)는 모바일 브라우저·앱 내장 웹뷰에서
+//         점점 더 많이 차단되어, 제작자가 아닌 다른 사용자는 로그인 자체가 안 되는 문제가 있었음.
 export interface UserNotionConnection {
   accessToken: string;
   workspaceId: string;
@@ -33,22 +34,11 @@ const app = express();
 app.use(express.json());
 app.set("trust proxy", 1);
 
-app.use(
-  cookieSession({
-    name: "byline_session",
-    keys: [process.env.SESSION_SECRET || "dev-secret-change-me"],
-    maxAge: 90 * 24 * 60 * 60 * 1000, // 90일 — 브라우저에 저장되므로 서버 재시작과 무관하게 유지됨
-    httpOnly: true,
-    sameSite: "none", // 위젯이 Notion 페이지 iframe 안에서 호출하므로 필요
-    secure: true, // 배포 시 HTTPS 필수 (secure 쿠키는 HTTP에서 저장 안 됨)
-  })
-);
-
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", process.env.ALLOWED_ORIGIN || "*");
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
@@ -58,7 +48,9 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, "..", "public")));
 
 function getConnection(req: express.Request): UserNotionConnection | undefined {
-  return req.session?.connection as UserNotionConnection | undefined;
+  const header = req.headers.authorization;
+  if (!header?.startsWith("Bearer ")) return undefined;
+  return verify<UserNotionConnection>(header.slice("Bearer ".length)) ?? undefined;
 }
 
 function requireConnection(req: express.Request, res: express.Response) {
@@ -70,22 +62,26 @@ function requireConnection(req: express.Request, res: express.Response) {
   return conn;
 }
 
-// 1) 구매자가 위젯에서 이 URL로 이동 → Notion 로그인/승인 화면으로 리다이렉트
+// 1) 위젯에서 이 URL을 새 창(팝업)으로 연다 → Notion 로그인/승인 화면으로 리다이렉트.
+//    iframe 안에서 직접 열지 않는 이유: Notion의 로그인 화면 자체가 iframe 안에서 렌더링을
+//    거부할 수 있어(클릭재킹 방지 정책), 그 경우 iframe에서는 계속 실패/리다이렉트가 반복된다.
 app.get("/auth/notion", (req, res) => {
-  const state = crypto.randomBytes(16).toString("hex");
-  req.session!.oauthState = state;
+  const state = sign({ ts: Date.now(), nonce: crypto.randomBytes(8).toString("hex") });
   res.redirect(getAuthorizeUrl(state));
 });
 
-// 2) Notion이 승인 후 여기로 돌아옴 → 토큰 교환 → 쿠키에 저장
+// 2) Notion이 승인 후 여기로 돌아옴 → 토큰 교환 → 팝업을 연 원래 창(위젯)에 postMessage로
+//    전달하고 팝업은 스스로 닫는다. (팝업이 막혀 일반 이동으로 열렸을 경우를 대비해
+//    window.opener가 없으면 URL 해시에 토큰을 실어 리다이렉트하는 방식으로 폴백한다.)
 app.get("/auth/notion/callback", async (req, res) => {
   const { code, state } = req.query;
 
   if (!code || typeof code !== "string") {
     return res.status(400).send("code가 없습니다.");
   }
-  if (state !== req.session?.oauthState) {
-    return res.status(400).send("state 불일치 (CSRF 의심). 다시 시도해주세요.");
+  const statePayload = typeof state === "string" ? verify<{ ts: number }>(state) : null;
+  if (!statePayload || Date.now() - statePayload.ts > 10 * 60 * 1000) {
+    return res.status(400).send("인증 요청이 유효하지 않거나 시간이 지났습니다 (CSRF 의심). 다시 시도해주세요.");
   }
 
   try {
@@ -97,10 +93,22 @@ app.get("/auth/notion/callback", async (req, res) => {
       botId: token.bot_id,
       userName: token.owner?.type === "user" ? token.owner.user?.name : undefined,
     };
-    req.session!.connection = connection;
+    const connToken = sign(connection);
+    const fallbackUrl = `${process.env.ALLOWED_ORIGIN || "/"}#token=${encodeURIComponent(connToken)}`;
 
-    // 배포 시: 프론트엔드의 "설정 완료" 화면으로 리다이렉트
-    res.redirect((process.env.ALLOWED_ORIGIN || "/") + "?connected=1");
+    res.send(`<!doctype html>
+<html><body style="font-family:sans-serif;padding:2rem;">
+<p>연결이 완료됐습니다. 이 창은 자동으로 닫힙니다…</p>
+<script>
+  var token = ${JSON.stringify(connToken)};
+  if (window.opener) {
+    window.opener.postMessage({ source: "byline-auth", token: token }, "*");
+    window.close();
+  } else {
+    window.location.href = ${JSON.stringify(fallbackUrl)};
+  }
+</script>
+</body></html>`);
   } catch (err) {
     console.error("[OAuth callback]", err);
     res.status(500).send("Notion 연결 중 오류가 발생했습니다.");
@@ -126,7 +134,8 @@ app.get("/api/status", async (req, res) => {
   });
 });
 
-// 구매자가 위 목록에서 필사 일지(또는 같은 모양의) DB를 고르면 그 DB에 연결
+// 구매자가 위 목록에서 필사 일지(또는 같은 모양의) DB를 고르면 그 DB에 연결.
+// 갱신된 연결 정보를 담은 새 토큰을 돌려주며, 클라이언트는 이 토큰으로 localStorage를 갱신해야 한다.
 app.post("/api/setup/database", async (req, res) => {
   const conn = requireConnection(req, res);
   if (!conn) return;
@@ -137,8 +146,8 @@ app.post("/api/setup/database", async (req, res) => {
   try {
     const notion = new Client({ auth: conn.accessToken });
     const dbConfig = await connectExistingDatabase(notion, databaseId);
-    req.session!.connection = { ...conn, ...dbConfig };
-    res.status(201).json({ ok: true });
+    const updated: UserNotionConnection = { ...conn, ...dbConfig };
+    res.status(201).json({ ok: true, token: sign(updated) });
   } catch (err) {
     console.error("[POST /api/setup/database]", err);
     const message = err instanceof Error ? err.message : "데이터베이스 연결 실패";
@@ -203,11 +212,6 @@ app.delete("/api/publish/:date", async (req, res) => {
     console.error("[DELETE /api/publish/:date]", err);
     res.status(500).json({ error: "발행 취소 실패" });
   }
-});
-
-app.post("/auth/disconnect", (req, res) => {
-  req.session = null;
-  res.status(204).end();
 });
 
 const port = process.env.PORT || 3000;

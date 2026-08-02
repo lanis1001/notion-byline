@@ -95,18 +95,36 @@ function FontStyles() {
   );
 }
 
+// 쿠키 대신 localStorage에 토큰을 들고 다닌다 (iframe 안 서드파티 쿠키가 모바일에서
+// 자주 막혀서, 제작자 아닌 다른 사용자는 로그인 자체가 안 되는 문제가 있었음).
+const TOKEN_KEY = 'byline_token';
+function getToken() {
+  try { return localStorage.getItem(TOKEN_KEY); } catch (e) { return null; }
+}
+function setToken(t) {
+  try {
+    if (t) localStorage.setItem(TOKEN_KEY, t);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch (e) { /* 저장 불가 환경 — 무시 */ }
+}
+function authHeaders() {
+  const t = getToken();
+  return t ? { Authorization: `Bearer ${t}` } : {};
+}
+
 async function apiGet(path) {
-  const res = await fetch(path, { credentials: 'include' });
+  const res = await fetch(path, { headers: { ...authHeaders() } });
+  if (res.status === 401) setToken(null);
   if (!res.ok) throw new Error(`${path} 요청 실패 (${res.status})`);
   return res.json();
 }
 async function apiPost(path, body) {
   const res = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body ?? {}),
   });
+  if (res.status === 401) setToken(null);
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `${path} 요청 실패 (${res.status})`);
@@ -114,11 +132,16 @@ async function apiPost(path, body) {
   return res.json().catch(() => ({}));
 }
 async function apiDelete(path) {
-  const res = await fetch(path, { method: 'DELETE', credentials: 'include' });
+  const res = await fetch(path, { method: 'DELETE', headers: { ...authHeaders() } });
+  if (res.status === 401) setToken(null);
   if (!res.ok && res.status !== 204) {
     const data = await res.json().catch(() => ({}));
     throw new Error(data.error || `${path} 요청 실패 (${res.status})`);
   }
+}
+
+function openAuthPopup() {
+  window.open('/auth/notion', 'byline-oauth', 'width=480,height=720');
 }
 
 function Byline() {
@@ -142,6 +165,7 @@ function Byline() {
       setRecords(new Set((data.records || []).map((r) => r.date)));
     } catch (e) {
       setError('필사 일지를 불러오지 못했습니다.');
+      if (!getToken()) setStatus({ connected: false });
     }
   }
 
@@ -158,13 +182,29 @@ function Byline() {
   }
 
   useEffect(() => {
+    // 팝업이 막혀 새 창 대신 같은 창에서 콜백이 열렸을 경우의 폴백: URL 해시에서 토큰 회수
+    const hash = window.location.hash;
+    if (hash.indexOf('#token=') === 0) {
+      setToken(decodeURIComponent(hash.slice('#token='.length)));
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
     loadStatus();
+
+    function onMessage(e) {
+      if (e.data && e.data.source === 'byline-auth' && e.data.token) {
+        setToken(e.data.token);
+        loadStatus();
+      }
+    }
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
   }, []);
 
   async function connectDatabase(databaseId) {
     setError(null);
     try {
-      await apiPost('/api/setup/database', { databaseId });
+      const data = await apiPost('/api/setup/database', { databaseId });
+      if (data.token) setToken(data.token);
       await loadStatus();
     } catch (e) {
       setError(e.message);
@@ -190,7 +230,12 @@ function Byline() {
       }
     } catch (e) {
       setRecords(records); // 실패 시 롤백
-      setError('저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      if (!getToken()) {
+        setStatus({ connected: false });
+        setError('연결이 끊어졌어요. 다시 연결해주세요.');
+      } else {
+        setError('저장에 실패했습니다. 잠시 후 다시 시도해주세요.');
+      }
     }
   }
 
@@ -232,13 +277,13 @@ function Byline() {
     return (
       <GateScreen T={THEME.light}>
         <p style={{ marginBottom: 16 }}>BYLINE을 쓰려면 먼저 Notion 워크스페이스에 연결해야 해요.</p>
-        <a
-          href="/auth/notion"
+        <button
+          onClick={openAuthPopup}
           className="font-sans font-semibold"
-          style={{ display: 'inline-block', padding: '10px 20px', background: THEME.light.filled, color: THEME.light.onFilled, textDecoration: 'none' }}
+          style={{ display: 'inline-block', padding: '10px 20px', background: THEME.light.filled, color: THEME.light.onFilled, border: 'none', cursor: 'pointer' }}
         >
           Notion에 연결하기
-        </a>
+        </button>
       </GateScreen>
     );
   }
