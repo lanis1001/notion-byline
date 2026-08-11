@@ -62,6 +62,54 @@ function requireConnection(req: express.Request, res: express.Response) {
   return conn;
 }
 
+function buildConnectionFromToken(
+  token: Awaited<ReturnType<typeof exchangeCodeForToken>>
+): UserNotionConnection {
+  return {
+    accessToken: token.access_token,
+    workspaceId: token.workspace_id,
+    workspaceName: token.workspace_name,
+    botId: token.bot_id,
+    userName: token.owner?.type === "user" ? token.owner.user?.name : undefined,
+  };
+}
+
+// 팝업 창 안에서 실행되는 스크립트를 렌더링한다.
+// [버그 1 수정] 기존에는 window.opener.postMessage 단일 경로였는데, Notion iframe 안에서
+// 연 팝업은 opener가 끊기는 경우가 흔해(1단계 확인) 원본 화면에 토큰이 전달 안 됐다.
+// BroadcastChannel은 opener 관계와 무관하게 "같은 출처(origin)"이기만 하면 동작하므로,
+// postMessage와 BroadcastChannel 두 경로를 동시에 시도해 어느 한쪽이라도 통하게 한다.
+// 그래도 원본 화면이 못 받는 극단적 경우(스토리지/브로드캐스트까지 완전히 분리된 브라우저)를
+// 대비해, 창을 바로 닫지 않고 안내 문구를 남겨 사용자가 직접 확인할 수 있게 한다.
+function renderAuthPopupCloser(connToken: string): string {
+  const fallbackUrl = `${process.env.ALLOWED_ORIGIN || "/"}#token=${encodeURIComponent(connToken)}`;
+  return `<!doctype html>
+<html><body style="font-family:sans-serif;padding:2rem;">
+<p id="msg">연결이 완료됐습니다. 이 창은 잠시 후 자동으로 닫힙니다…</p>
+<script>
+  var token = ${JSON.stringify(connToken)};
+  var delivered = false;
+  try {
+    var bc = new BroadcastChannel('byline-auth');
+    bc.postMessage({ token: token });
+    bc.close();
+    delivered = true;
+  } catch (e) {}
+  if (window.opener) {
+    try {
+      window.opener.postMessage({ source: 'byline-auth', token: token }, '*');
+      delivered = true;
+    } catch (e) {}
+  }
+  if (delivered) {
+    setTimeout(function () { window.close(); }, 600);
+  } else {
+    window.location.href = ${JSON.stringify(fallbackUrl)};
+  }
+</script>
+</body></html>`;
+}
+
 // 1) 위젯에서 이 URL을 새 창(팝업)으로 연다 → Notion 로그인/승인 화면으로 리다이렉트.
 //    iframe 안에서 직접 열지 않는 이유: Notion의 로그인 화면 자체가 iframe 안에서 렌더링을
 //    거부할 수 있어(클릭재킹 방지 정책), 그 경우 iframe에서는 계속 실패/리다이렉트가 반복된다.
@@ -86,29 +134,8 @@ app.get("/auth/notion/callback", async (req, res) => {
 
   try {
     const token = await exchangeCodeForToken(code);
-    const connection: UserNotionConnection = {
-      accessToken: token.access_token,
-      workspaceId: token.workspace_id,
-      workspaceName: token.workspace_name,
-      botId: token.bot_id,
-      userName: token.owner?.type === "user" ? token.owner.user?.name : undefined,
-    };
-    const connToken = sign(connection);
-    const fallbackUrl = `${process.env.ALLOWED_ORIGIN || "/"}#token=${encodeURIComponent(connToken)}`;
-
-    res.send(`<!doctype html>
-<html><body style="font-family:sans-serif;padding:2rem;">
-<p>연결이 완료됐습니다. 이 창은 자동으로 닫힙니다…</p>
-<script>
-  var token = ${JSON.stringify(connToken)};
-  if (window.opener) {
-    window.opener.postMessage({ source: "byline-auth", token: token }, "*");
-    window.close();
-  } else {
-    window.location.href = ${JSON.stringify(fallbackUrl)};
-  }
-</script>
-</body></html>`);
+    const connToken = sign(buildConnectionFromToken(token));
+    res.send(renderAuthPopupCloser(connToken));
   } catch (err) {
     console.error("[OAuth callback]", err);
     res.status(500).send("Notion 연결 중 오류가 발생했습니다.");

@@ -112,9 +112,17 @@ function authHeaders() {
   return t ? { Authorization: `Bearer ${t}` } : {};
 }
 
+function clearTokenIfUnauthorized(res) {
+  if (res.status === 401) setToken(null);
+}
+async function throwApiError(res, path) {
+  const data = await res.json().catch(() => ({}));
+  throw new Error(data.error || `${path} 요청 실패 (${res.status})`);
+}
+
 async function apiGet(path) {
   const res = await fetch(path, { headers: { ...authHeaders() } });
-  if (res.status === 401) setToken(null);
+  clearTokenIfUnauthorized(res);
   if (!res.ok) throw new Error(`${path} 요청 실패 (${res.status})`);
   return res.json();
 }
@@ -124,20 +132,14 @@ async function apiPost(path, body) {
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body ?? {}),
   });
-  if (res.status === 401) setToken(null);
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `${path} 요청 실패 (${res.status})`);
-  }
+  clearTokenIfUnauthorized(res);
+  if (!res.ok) await throwApiError(res, path);
   return res.json().catch(() => ({}));
 }
 async function apiDelete(path) {
   const res = await fetch(path, { method: 'DELETE', headers: { ...authHeaders() } });
-  if (res.status === 401) setToken(null);
-  if (!res.ok && res.status !== 204) {
-    const data = await res.json().catch(() => ({}));
-    throw new Error(data.error || `${path} 요청 실패 (${res.status})`);
-  }
+  clearTokenIfUnauthorized(res);
+  if (!res.ok && res.status !== 204) await throwApiError(res, path);
 }
 
 function openAuthPopup() {
@@ -181,31 +183,65 @@ function Byline() {
     }
   }
 
+  // 어디서 토큰을 받든(팝업 postMessage / 해시 폴백 / DB 선택 응답) 동일한 한 곳에서 처리.
+  // 1단계에서 확인된 "팝업 → 원본 화면 전파" 경로가 바로 이 함수다.
+  function applyIncomingToken(token) {
+    setToken(token);
+    return loadStatus();
+  }
+
   useEffect(() => {
     // 팝업이 막혀 새 창 대신 같은 창에서 콜백이 열렸을 경우의 폴백: URL 해시에서 토큰 회수
     const hash = window.location.hash;
     if (hash.indexOf('#token=') === 0) {
-      setToken(decodeURIComponent(hash.slice('#token='.length)));
+      const token = decodeURIComponent(hash.slice('#token='.length));
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      applyIncomingToken(token);
+    } else {
+      loadStatus();
     }
-    loadStatus();
 
     function onMessage(e) {
       if (e.data && e.data.source === 'byline-auth' && e.data.token) {
-        setToken(e.data.token);
-        loadStatus();
+        applyIncomingToken(e.data.token);
       }
     }
     window.addEventListener('message', onMessage);
-    return () => window.removeEventListener('message', onMessage);
+
+    // [버그 1 수정] postMessage는 팝업의 window.opener가 살아있어야 도착한다. Notion iframe
+    // 안에서 연 팝업은 opener가 끊기는 경우가 흔해서, opener와 무관하게 동작하는
+    // BroadcastChannel도 같은 이벤트를 듣는다 — 둘 중 하나만 통해도 정상 반영된다.
+    let bc = null;
+    try {
+      bc = new BroadcastChannel('byline-auth');
+      bc.addEventListener('message', (e) => {
+        if (e.data && e.data.token) applyIncomingToken(e.data.token);
+      });
+    } catch (e) {
+      // BroadcastChannel 미지원 브라우저 — postMessage 경로만 사용
+    }
+
+    // 안전장치: 팝업을 닫고 원래 화면으로 돌아왔을 때(포커스 복귀) 상태를 한 번 더 확인한다.
+    // (마운트 시 한 번만 등록되는 effect라 status를 조건으로 걸면 오래된 값을 참조하게 되므로,
+    // 조건 없이 매번 재확인한다 — 이미 연결된 상태면 그냥 같은 결과를 한 번 더 받을 뿐이다.)
+    function onVisible() {
+      if (document.visibilityState === 'visible') loadStatus();
+    }
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      window.removeEventListener('message', onMessage);
+      if (bc) bc.close();
+      document.removeEventListener('visibilitychange', onVisible);
+    };
   }, []);
 
   async function connectDatabase(databaseId) {
     setError(null);
     try {
       const data = await apiPost('/api/setup/database', { databaseId });
-      if (data.token) setToken(data.token);
-      await loadStatus();
+      if (data.token) await applyIncomingToken(data.token);
+      else await loadStatus();
     } catch (e) {
       setError(e.message);
     }
