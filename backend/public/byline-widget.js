@@ -143,7 +143,14 @@ async function apiDelete(path) {
 }
 
 function openAuthPopup() {
-  window.open('/auth/notion', 'byline-oauth', 'width=480,height=720');
+  const popup = window.open('/auth/notion', 'byline-oauth', 'width=480,height=720');
+  // 팝업이 막히면(브라우저 팝업 차단 또는 iframe sandbox 제약) window.open이 null을
+  // 돌려준다. 이 경우 현재 창(=Notion 안의 iframe)에서 직접 이동을 시도한다 — Notion이
+  // 로그인 화면을 iframe 안에서 렌더링하길 거부하면 이마저 실패할 수 있지만, 버튼을
+  // 눌러도 아무 반응이 없는 것보다는 시도해보는 편이 낫다.
+  if (!popup) {
+    window.location.href = '/auth/notion';
+  }
 }
 
 function Byline() {
@@ -555,15 +562,15 @@ function Byline() {
     );
   }
 
-  // ---------- 상세 패널 (일 뷰가 아닐 때, 선택된 날짜 요약) ----------
-  // 과거 날짜는 조회만 가능 — 수동 토글은 오늘 날짜만 허용한다.
-  // (추후 Notion 쪽 자동화와 맞물릴 때 과거 데이터가 수동으로 바뀌면 충돌할 수 있어 이번 버전에서 제외)
+  // ---------- 상세 패널 (일 뷰가 아닐 때, 선택된 날짜 요약 + 발행/취소 + 카드 열기) ----------
+  // 발행/취소와 카드 열기의 유일한 진입점 — Footer의 중복 버튼은 없애고 여기로 통일했다.
+  // 날짜 제한(과거엔 토글 금지)도 요청에 따라 다시 풀었다: 미발행 날짜를 클릭해 그 날짜로
+  // 바로 발행할 수 있다.
   function DetailPanel() {
     const completed = inRange(selectedDate) ? getCompleted(selected) : false;
     const vol = completed ? volAt(selectedDate) : null;
     const cardUrl = records ? records.get(selected) : null;
     if (!inRange(selectedDate)) return null;
-    const isToday = selected === todayKey;
     return (
       <div
         className="font-sans"
@@ -574,16 +581,13 @@ function Byline() {
           <span style={{ color: T.muted }}>{completed ? `Vol.${pad3(vol)} · 완료` : '미완료'}</span>
         </div>
         <div className="flex items-center gap-3 mt-2">
-          {isToday && (
-            <button
-              onClick={() => toggleDay(selected)}
-              className="underline underline-offset-2"
-              style={{ fontSize: 11, color: T.muted, background: 'none', border: 'none', cursor: 'pointer' }}
-            >
-              {completed ? '오늘 발행 취소' : '오늘 발행으로 표시'}
-            </button>
-          )}
-          {/* [버그 2 수정] 카드가 있으면(오늘이든 과거든) 바로 열 수 있는 링크를 보여준다 */}
+          <button
+            onClick={() => toggleDay(selected)}
+            className="underline underline-offset-2"
+            style={{ fontSize: 11, color: T.muted, background: 'none', border: 'none', cursor: 'pointer' }}
+          >
+            {completed ? '이 날짜 발행 취소' : '이 날짜로 발행'}
+          </button>
           {cardUrl && (
             <a
               href={cardUrl}
@@ -595,19 +599,15 @@ function Byline() {
               카드 열기 →
             </a>
           )}
-          {!isToday && !cardUrl && (
-            <span style={{ fontSize: 11, color: T.muted }}>
-              지난 날짜는 Notion의 필사 일지 DB에서 직접 수정하세요.
-            </span>
-          )}
         </div>
       </div>
     );
   }
 
   // ---------- 하단 오늘의 CTA ----------
+  // 발행 완료 후의 "카드 열기"/"발행 취소"는 DetailPanel로 통일했다 — 오늘 날짜가 기본
+  // 선택 상태라 바로 아래(또는 옆)에서 보이므로 여기서 중복으로 보여줄 필요가 없다.
   const todayCompleted = getCompleted(todayKey);
-  const todayCardUrl = records ? records.get(todayKey) : null;
   const Footer = (
     <div style={{ marginTop: 14 }}>
       {error && (
@@ -634,25 +634,6 @@ function Byline() {
           <div className="w-full py-2.5 text-center font-sans font-semibold" style={{ fontSize: 13, background: T.filled, color: T.onFilled }}>
             오늘의 BYLINE이 발행되었습니다 ✓
           </div>
-          {/* [버그 2 수정] 발행 직후 방금 만든 카드를 바로 열 수 있는 진입점 */}
-          {todayCardUrl && (
-            <a
-              href={todayCardUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-sans font-semibold underline underline-offset-2"
-              style={{ fontSize: 12, color: T.ink }}
-            >
-              오늘 카드 열기 →
-            </a>
-          )}
-          <button
-            onClick={() => toggleDay(todayKey)}
-            className="font-sans underline underline-offset-2"
-            style={{ fontSize: 11, color: T.muted, background: 'none', border: 'none', cursor: 'pointer' }}
-          >
-            오늘 발행 취소
-          </button>
         </div>
       )}
     </div>
@@ -756,8 +737,10 @@ function ToggleBtn({ active, onClick, T, children }) {
   );
 }
 
+// [레이아웃 버그 수정] 이전엔 visible=false일 때 null을 반환해서, 도장이 나타나는 순간
+// 마스트헤드 줄 높이가 46px로 늘어나며 items-end 정렬 때문에 BYLINE 글자가 아래로
+// 밀려 보였다. 항상 같은 46x46 공간을 차지하되 안 보일 때만 투명 처리해 높이를 고정한다.
 function StampBadge({ visible, T }) {
-  if (!visible) return null;
   return (
     <div
       style={{
@@ -771,6 +754,8 @@ function StampBadge({ visible, T }) {
         justifyContent: 'center',
         transform: 'rotate(-8deg)',
         flexShrink: 0,
+        opacity: visible ? 1 : 0,
+        visibility: visible ? 'visible' : 'hidden',
       }}
     >
       <span style={{ fontSize: 8, color: T.accent, fontWeight: 700, letterSpacing: '0.08em' }}>오늘</span>
