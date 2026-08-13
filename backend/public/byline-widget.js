@@ -156,15 +156,17 @@ function Byline() {
   const [selected, setSelected] = useState(todayKey);
 
   const [status, setStatus] = useState(null); // null=로딩중
-  const [records, setRecords] = useState(null); // Set<'YYYY-MM-DD'> (필사 완료된 날짜들), null=아직 미로딩
+  const [records, setRecords] = useState(null); // Map<'YYYY-MM-DD', url> (필사 완료된 날짜→카드 링크), null=아직 미로딩
   const [error, setError] = useState(null);
 
   const T = THEME[theme];
 
+  // records: Map<'YYYY-MM-DD', notionPageUrl> — 날짜별 필사 완료 여부와, 그날 카드를
+  // 여는 "카드 열기" 링크(버그 2 수정)를 함께 들고 있는다.
   async function loadRecords() {
     try {
       const data = await apiGet('/api/records');
-      setRecords(new Set((data.records || []).map((r) => r.date)));
+      setRecords(new Map((data.records || []).map((r) => [r.date, r.url])));
     } catch (e) {
       setError('필사 일지를 불러오지 못했습니다.');
       if (!getToken()) setStatus({ connected: false });
@@ -254,15 +256,21 @@ function Byline() {
   async function toggleDay(dateKey) {
     if (!records) return;
     const wasCompleted = records.has(dateKey);
-    const next = new Set(records);
+    const next = new Map(records);
     if (wasCompleted) next.delete(dateKey);
-    else next.add(dateKey);
+    else next.set(dateKey, null); // 카드 URL은 서버 응답을 받아야 알 수 있어 일단 비워둠
     setRecords(next); // optimistic update
     try {
       if (wasCompleted) {
         await apiDelete(`/api/publish/${dateKey}`);
       } else {
-        await apiPost('/api/publish', { date: dateKey });
+        const data = await apiPost('/api/publish', { date: dateKey });
+        // [버그 2 수정] 발행 직후 카드 URL을 채워 넣어 "카드 열기" 링크가 뜨게 한다.
+        setRecords((prev) => {
+          const withUrl = new Map(prev);
+          withUrl.set(dateKey, data.record?.url || null);
+          return withUrl;
+        });
       }
     } catch (e) {
       setRecords(records); // 실패 시 롤백
@@ -279,7 +287,7 @@ function Byline() {
     if (!records) return 0;
     const key = dk(d);
     let count = 0;
-    records.forEach((dateStr) => {
+    records.forEach((url, dateStr) => {
       if (dateStr <= key) count++;
     });
     return count;
@@ -290,7 +298,7 @@ function Byline() {
   const lastCompleted = useMemo(() => {
     if (!records || records.size === 0) return null;
     let latest = null;
-    records.forEach((dateStr) => {
+    records.forEach((url, dateStr) => {
       if (dateStr <= todayKey && (!latest || dateStr > latest)) latest = dateStr;
     });
     return latest ? new Date(latest + 'T00:00:00') : null;
@@ -553,6 +561,7 @@ function Byline() {
   function DetailPanel() {
     const completed = inRange(selectedDate) ? getCompleted(selected) : false;
     const vol = completed ? volAt(selectedDate) : null;
+    const cardUrl = records ? records.get(selected) : null;
     if (!inRange(selectedDate)) return null;
     const isToday = selected === todayKey;
     return (
@@ -564,25 +573,41 @@ function Byline() {
           <span style={{ color: T.ink, fontWeight: 600 }}>{fmtDot(selectedDate)}</span>
           <span style={{ color: T.muted }}>{completed ? `Vol.${pad3(vol)} · 완료` : '미완료'}</span>
         </div>
-        {isToday ? (
-          <button
-            onClick={() => toggleDay(selected)}
-            className="mt-2 underline underline-offset-2"
-            style={{ fontSize: 11, color: T.muted, background: 'none', border: 'none', cursor: 'pointer' }}
-          >
-            {completed ? '오늘 발행 취소' : '오늘 발행으로 표시'}
-          </button>
-        ) : (
-          <div className="mt-2" style={{ fontSize: 11, color: T.muted }}>
-            지난 날짜는 Notion의 필사 일지 DB에서 직접 수정하세요.
-          </div>
-        )}
+        <div className="flex items-center gap-3 mt-2">
+          {isToday && (
+            <button
+              onClick={() => toggleDay(selected)}
+              className="underline underline-offset-2"
+              style={{ fontSize: 11, color: T.muted, background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              {completed ? '오늘 발행 취소' : '오늘 발행으로 표시'}
+            </button>
+          )}
+          {/* [버그 2 수정] 카드가 있으면(오늘이든 과거든) 바로 열 수 있는 링크를 보여준다 */}
+          {cardUrl && (
+            <a
+              href={cardUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline underline-offset-2"
+              style={{ fontSize: 11, color: T.ink, fontWeight: 600 }}
+            >
+              카드 열기 →
+            </a>
+          )}
+          {!isToday && !cardUrl && (
+            <span style={{ fontSize: 11, color: T.muted }}>
+              지난 날짜는 Notion의 필사 일지 DB에서 직접 수정하세요.
+            </span>
+          )}
+        </div>
       </div>
     );
   }
 
   // ---------- 하단 오늘의 CTA ----------
   const todayCompleted = getCompleted(todayKey);
+  const todayCardUrl = records ? records.get(todayKey) : null;
   const Footer = (
     <div style={{ marginTop: 14 }}>
       {error && (
@@ -609,6 +634,18 @@ function Byline() {
           <div className="w-full py-2.5 text-center font-sans font-semibold" style={{ fontSize: 13, background: T.filled, color: T.onFilled }}>
             오늘의 BYLINE이 발행되었습니다 ✓
           </div>
+          {/* [버그 2 수정] 발행 직후 방금 만든 카드를 바로 열 수 있는 진입점 */}
+          {todayCardUrl && (
+            <a
+              href={todayCardUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-sans font-semibold underline underline-offset-2"
+              style={{ fontSize: 12, color: T.ink }}
+            >
+              오늘 카드 열기 →
+            </a>
+          )}
           <button
             onClick={() => toggleDay(todayKey)}
             className="font-sans underline underline-offset-2"

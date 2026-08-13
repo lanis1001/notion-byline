@@ -10,6 +10,7 @@ export interface DbConfig {
 export interface PublishRecord {
   pageId: string;
   date: string; // YYYY-MM-DD
+  url: string; // 위젯에서 "카드 열기" 링크로 사용
 }
 
 // 멀티테넌트 구조라 client/databaseId를 매번 인자로 받음 (전역 싱글턴 금지).
@@ -37,10 +38,10 @@ export async function listPublishRecords(
     });
 
     for (const page of res.results) {
-      if (!("properties" in page)) continue;
+      if (page.object !== "page" || !("properties" in page)) continue;
       const dateProp = page.properties[cfg.dateProperty];
       if (dateProp?.type === "date" && dateProp.date?.start) {
-        records.push({ pageId: page.id, date: dateProp.date.start });
+        records.push({ pageId: page.id, date: dateProp.date.start, url: page.url });
       }
     }
 
@@ -61,8 +62,8 @@ export async function findRecordByDate(
   });
 
   const page = res.results[0];
-  if (!page || !("properties" in page)) return null;
-  return { pageId: page.id, date };
+  if (!page || page.object !== "page" || !("properties" in page)) return null;
+  return { pageId: page.id, date, url: page.url };
 }
 
 export async function createPublishRecord(
@@ -89,7 +90,7 @@ export async function createPublishRecord(
     },
   });
 
-  return { pageId: page.id, date };
+  return { pageId: page.id, date, url: "url" in page ? page.url : "" };
 }
 
 export async function cancelPublishRecord(
