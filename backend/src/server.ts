@@ -74,40 +74,51 @@ function buildConnectionFromToken(
   };
 }
 
-// 팝업 창 안에서 실행되는 스크립트를 렌더링한다.
-// [버그 1 수정] 기존에는 window.opener.postMessage 단일 경로였는데, Notion iframe 안에서
-// 연 팝업은 opener가 끊기는 경우가 흔해(1단계 확인) 원본 화면에 토큰이 전달 안 됐다.
-// BroadcastChannel은 opener 관계와 무관하게 "같은 출처(origin)"이기만 하면 동작하므로,
-// postMessage와 BroadcastChannel 두 경로를 동시에 시도해 어느 한쪽이라도 통하게 한다.
-// 그래도 원본 화면이 못 받는 극단적 경우(스토리지/브로드캐스트까지 완전히 분리된 브라우저)를
-// 대비해, 창을 바로 닫지 않고 안내 문구를 남겨 사용자가 직접 확인할 수 있게 한다.
-function renderAuthPopupCloser(connToken: string): string {
-  const fallbackUrl = `${process.env.ALLOWED_ORIGIN || "/"}#token=${encodeURIComponent(connToken)}`;
+// 공통 페이지 스타일 — 에러/완료 화면에서 재사용 (LÉTRA 톤에 맞춘 최소한의 스타일)
+function pageShell(bodyHtml: string): string {
   return `<!doctype html>
-<html><body style="font-family:sans-serif;padding:2rem;">
-<p id="msg">연결이 완료됐습니다. 이 창은 잠시 후 자동으로 닫힙니다…</p>
+<html><head><meta charset="utf-8" /></head>
+<body style="font-family:'Cormorant Garamond',Georgia,serif;background:#F5F1E8;color:#111111;padding:3rem 2rem;text-align:center;">
+${bodyHtml}
+</body></html>`;
+}
+
+function renderErrorPage(message: string): string {
+  return pageShell(`
+<p style="font-size:16px;margin-bottom:20px;">${message}</p>
+<a href="/auth/notion" style="display:inline-block;padding:10px 20px;background:#111111;color:#F5F1E8;text-decoration:none;font-family:sans-serif;font-weight:600;font-size:13px;">다시 연결하기</a>
+`);
+}
+
+// 팝업(또는 팝업이 막혀 원래 창 자신)에서 실행되는 스크립트를 렌더링한다.
+// [버그 1/추가 수정] 세 가지를 모두 시도해 어느 하나만 통해도 정상 반영되게 한다:
+//   1) 지금 이 스크립트가 실행 중인 컨텍스트의 localStorage에 직접 저장.
+//      window.open이 막혀 팝업 없이 원래 창(=Notion 안 iframe) 자신이 여기까지 왔다면,
+//      "여기"가 곧 원본 위젯이므로 이 한 줄로 끝난다 — 해시 전달 같은 우회가 필요 없다.
+//   2) BroadcastChannel — 진짜 팝업이 열렸고 opener는 끊겼지만 같은 브라우저/출처인 경우.
+//   3) window.opener.postMessage — 진짜 팝업이고 opener가 살아있는 정상 경로.
+// window.opener가 있으면(=진짜 팝업) 창을 닫고, 없으면(=원래 창 자신이었던 경우) 이미
+// 로컬 저장까지 끝났으니 깨끗한 주소로 돌아가 위젯이 새로 뜨게 한다.
+function renderAuthPopupCloser(connToken: string): string {
+  const cleanUrl = process.env.ALLOWED_ORIGIN || "/";
+  return pageShell(`
+<p id="msg">연결이 완료됐습니다…</p>
 <script>
   var token = ${JSON.stringify(connToken)};
-  var delivered = false;
+  try { localStorage.setItem('byline_token', token); } catch (e) {}
   try {
     var bc = new BroadcastChannel('byline-auth');
     bc.postMessage({ token: token });
     bc.close();
-    delivered = true;
   } catch (e) {}
   if (window.opener) {
-    try {
-      window.opener.postMessage({ source: 'byline-auth', token: token }, '*');
-      delivered = true;
-    } catch (e) {}
-  }
-  if (delivered) {
+    try { window.opener.postMessage({ source: 'byline-auth', token: token }, '*'); } catch (e) {}
     setTimeout(function () { window.close(); }, 600);
   } else {
-    window.location.href = ${JSON.stringify(fallbackUrl)};
+    window.location.href = ${JSON.stringify(cleanUrl)};
   }
 </script>
-</body></html>`;
+`);
 }
 
 // 1) 위젯에서 이 URL을 새 창(팝업)으로 연다 → Notion 로그인/승인 화면으로 리다이렉트.
@@ -125,11 +136,15 @@ app.get("/auth/notion/callback", async (req, res) => {
   const { code, state } = req.query;
 
   if (!code || typeof code !== "string") {
-    return res.status(400).send("code가 없습니다.");
+    return res
+      .status(400)
+      .send(renderErrorPage("Notion에서 필요한 정보를 받지 못했어요. 연결을 다시 시도해주세요."));
   }
   const statePayload = typeof state === "string" ? verify<{ ts: number }>(state) : null;
-  if (!statePayload || Date.now() - statePayload.ts > 10 * 60 * 1000) {
-    return res.status(400).send("인증 요청이 유효하지 않거나 시간이 지났습니다 (CSRF 의심). 다시 시도해주세요.");
+  if (!statePayload || Date.now() - statePayload.ts > 30 * 60 * 1000) {
+    return res
+      .status(400)
+      .send(renderErrorPage("연결 요청 시간이 지났어요(30분 제한). 아래 버튼으로 다시 시도해주세요."));
   }
 
   try {
@@ -138,7 +153,9 @@ app.get("/auth/notion/callback", async (req, res) => {
     res.send(renderAuthPopupCloser(connToken));
   } catch (err) {
     console.error("[OAuth callback]", err);
-    res.status(500).send("Notion 연결 중 오류가 발생했습니다.");
+    res
+      .status(500)
+      .send(renderErrorPage("Notion 연결 중 문제가 생겼어요. 잠시 후 다시 시도해주세요."));
   }
 });
 
