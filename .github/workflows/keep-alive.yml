@@ -1,0 +1,17 @@
+name: Keep BYLINE server awake
+
+# Render 무료 요금제는 일정 시간 요청이 없으면 서버를 재운다(다음 요청이 올 때 최대
+# 1분 정도 깨어나는 시간이 걸림). 사용자의 컴퓨터가 켜져 있지 않아도 GitHub이 대신
+# 주기적으로 핑을 보내 서버가 잠들지 않게 한다 — 새 유료 서비스 없이 무료로 해결.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping BYLINE server
+        run: |
+          curl -sS -o /dev/null -w "status: %{http_code}\n" https://byline-oauth.onrender.com/ || true

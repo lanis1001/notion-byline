@@ -238,10 +238,18 @@ function Byline() {
     }
     document.addEventListener('visibilitychange', onVisible);
 
+    // 모바일(특히 Notion 앱 안의 웹뷰)에서는 visibilitychange가 아예 안 터지는 경우가 있어,
+    // 뒤로가기/앞으로가기나 bfcache 복원 시 더 안정적으로 발생하는 pageshow도 같이 듣는다.
+    function onPageShow() {
+      loadStatus();
+    }
+    window.addEventListener('pageshow', onPageShow);
+
     return () => {
       window.removeEventListener('message', onMessage);
       if (bc) bc.close();
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pageshow', onPageShow);
     };
   }, []);
 
@@ -334,6 +342,16 @@ function Byline() {
           style={{ display: 'inline-block', padding: '10px 20px', background: THEME.light.filled, color: THEME.light.onFilled, border: 'none', cursor: 'pointer' }}
         >
           Notion에 연결하기
+        </button>
+        {/* 이미 다른 곳(휴대폰 브라우저 등)에서 연결을 마쳤는데 이 화면이 자동으로
+            안 바뀔 때를 위한 수동 새로고침. 모바일 앱 웹뷰는 자동 재확인 이벤트가
+            아예 안 터지는 경우가 있어, 이벤트에만 기대지 않는 확실한 대안이 필요하다. */}
+        <button
+          onClick={loadStatus}
+          className="font-sans"
+          style={{ display: 'block', margin: '14px auto 0', padding: 0, background: 'none', border: 'none', color: THEME.light.muted, fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}
+        >
+          이미 연결했다면 새로고침
         </button>
       </GateScreen>
     );
