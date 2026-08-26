@@ -245,11 +245,17 @@ function Byline() {
     }
     window.addEventListener('pageshow', onPageShow);
 
+    // 그래도 안 되는 환경(예: 다른 기기에서 방금 발행한 게 PC 쪽에 안 보임)을 위한 최후의
+    // 보험: 이벤트에 기대지 않고 30초마다 그냥 다시 확인한다. 연결 전이면 어차피 같은
+    // "연결 안 됨" 결과를 반복해서 받을 뿐이라 해가 되지 않는다.
+    const poll = setInterval(() => loadStatus(), 30000);
+
     return () => {
       window.removeEventListener('message', onMessage);
       if (bc) bc.close();
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('pageshow', onPageShow);
+      clearInterval(poll);
     };
   }, []);
 
@@ -666,13 +672,23 @@ function Byline() {
           </div>
         </div>
       )}
-      <button
-        onClick={disconnect}
-        className="font-sans"
-        style={{ display: 'block', margin: '10px auto 0', padding: 0, background: 'none', border: 'none', color: T.muted, fontSize: 11, textDecoration: 'underline', cursor: 'pointer' }}
-      >
-        다른 계정 · 다른 목록으로 다시 연결하기
-      </button>
+      <div className="flex items-center justify-center gap-3" style={{ marginTop: 10 }}>
+        <button
+          onClick={loadStatus}
+          className="font-sans"
+          style={{ padding: 0, background: 'none', border: 'none', color: T.muted, fontSize: 11, textDecoration: 'underline', cursor: 'pointer' }}
+        >
+          새로고침
+        </button>
+        <span style={{ color: T.rule }}>·</span>
+        <button
+          onClick={disconnect}
+          className="font-sans"
+          style={{ padding: 0, background: 'none', border: 'none', color: T.muted, fontSize: 11, textDecoration: 'underline', cursor: 'pointer' }}
+        >
+          다른 계정 · 다른 목록으로 다시 연결하기
+        </button>
+      </div>
     </div>
   );
 
