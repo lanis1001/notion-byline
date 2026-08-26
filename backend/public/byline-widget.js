@@ -607,10 +607,11 @@ function Byline() {
             {completed ? '이 날짜 발행 취소' : '이 날짜로 발행'}
           </button>
           {cardUrl && (
+            // target="_blank"로 새 창을 띄우려 하면 Notion 모바일 앱 안의 내장 화면(웹뷰)에서
+            // 새 창을 못 열어 리디렉션이 깨지는 경우가 있어(OAuth 팝업 때와 같은 종류의 문제),
+            // 같은 화면에서 그대로 이동하도록 둔다.
             <a
               href={cardUrl}
-              target="_blank"
-              rel="noopener noreferrer"
               className="underline underline-offset-2"
               style={{ fontSize: 11, color: T.ink, fontWeight: 600 }}
             >
