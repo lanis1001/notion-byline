@@ -264,6 +264,17 @@ function Byline() {
     }
   }
 
+  // 잘못된 데이터베이스에 연결됐거나(예: 예전 프로토타입 DB를 잘못 골랐을 때) 다른
+  // Notion 계정으로 바꾸고 싶을 때, 처음 연결 화면으로 직접 되돌아갈 방법이 없었다.
+  // 서버에는 지울 상태가 없으므로(토큰이 곧 연결 정보) 로컬 토큰만 지우면 된다.
+  function disconnect() {
+    if (!window.confirm('연결을 해제할까요? 다시 쓰려면 Notion 로그인을 새로 진행해야 해요.')) return;
+    setToken(null);
+    setRecords(null);
+    setError(null);
+    setStatus({ connected: false });
+  }
+
   function getCompleted(dateKey) {
     return records ? records.has(dateKey) : false;
   }
@@ -655,6 +666,13 @@ function Byline() {
           </div>
         </div>
       )}
+      <button
+        onClick={disconnect}
+        className="font-sans"
+        style={{ display: 'block', margin: '10px auto 0', padding: 0, background: 'none', border: 'none', color: T.muted, fontSize: 11, textDecoration: 'underline', cursor: 'pointer' }}
+      >
+        다른 계정 · 다른 목록으로 다시 연결하기
+      </button>
     </div>
   );
 
