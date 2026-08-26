@@ -1,0 +1,19 @@
+{
+  "name": "BYLINE — 매일 뉴스 필사",
+  "short_name": "BYLINE",
+  "description": "LÉTRA의 매일 필사 기록 위젯",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F5F1E8",
+  "theme_color": "#111111",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/assets/icon-letra-mark.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
