@@ -81,10 +81,19 @@ export async function createPublishRecord(
     return existing;
   }
 
+  // 제목을 "Vol.NNN"으로 자동 부여한다. 잡지 발행 번호처럼 지금 살아있는(휴지통에
+  // 안 간) 카드 개수 + 1을 쓴다 — 언어(한국어/영어/스페인어) 상관없이 DB 전체 기준
+  // 하나의 번호 체계. 중간 번호가 취소돼 휴지통에 가도 뒤 번호를 다시 매기지는
+  // 않는다(실제 잡지 발행 번호도 결번이 생기지 그런다) — 노션에는 "지금 몇 번째
+  // 줄인지"를 실시간으로 재계산하는 기능이 없어서, 하려면 카드가 지워질 때마다
+  // 뒤 카드 전부의 제목을 다시 쓰는 별도 자동화가 필요해 과했다.
+  const vol = (await listPublishRecords(notion, cfg)).length + 1;
+  const title = `Vol.${String(vol).padStart(3, "0")}`;
+
   const page = await notion.pages.create({
     parent: { database_id: cfg.databaseId },
     properties: {
-      [cfg.titleProperty]: { title: [] },
+      [cfg.titleProperty]: { title: [{ text: { content: title } }] },
       [cfg.dateProperty]: { date: { start: date } },
       [cfg.checkboxProperty]: { checkbox: true },
     },
