@@ -624,11 +624,14 @@ function Byline() {
             {completed ? '이 날짜 발행 취소' : '이 날짜로 발행'}
           </button>
           {cardUrl && (
-            // target="_blank"로 새 창을 띄우려 하면 Notion 모바일 앱 안의 내장 화면(웹뷰)에서
-            // 새 창을 못 열어 리디렉션이 깨지는 경우가 있어(OAuth 팝업 때와 같은 종류의 문제),
-            // 같은 화면에서 그대로 이동하도록 둔다.
+            // 같은 화면(iframe 자기 자신)에서 이동시키면, 이 위젯이 박혀있는 노션 페이지의
+            // iframe 안에서 다시 노션 카드 자신을 렌더링하려는 셈이 되어, 노션이 보안상
+            // 이를 거부해(다른 사이트 iframe 안에서 자기 자신을 못 열게 막음) 화면이
+            // 하얗게 빈다. 새 탭으로 열어야 정상적으로 카드가 뜬다.
             <a
               href={cardUrl}
+              target="_blank"
+              rel="noopener noreferrer"
               className="underline underline-offset-2"
               style={{ fontSize: 11, color: T.ink, fontWeight: 600 }}
             >
